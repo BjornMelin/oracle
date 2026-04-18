@@ -238,7 +238,15 @@ export async function ensureLoggedIn(
       ? "No ChatGPT cookies were applied; sign in to chatgpt.com in Chrome or pass inline cookies (--browser-inline-cookies[(-file)] / ORACLE_BROWSER_COOKIES_JSON)."
       : "ChatGPT login appears missing; open chatgpt.com in Chrome to refresh the session or provide inline cookies (--browser-inline-cookies[(-file)] / ORACLE_BROWSER_COOKIES_JSON).";
 
-  throw new Error(`ChatGPT session not detected.${domLabel} ${cookieHint}`);
+  throw new BrowserAutomationError(`ChatGPT session not detected.${domLabel} ${cookieHint}`, {
+    stage: "login-required",
+    details: {
+      status: probe.status,
+      domLoginCta: Boolean(probe.domLoginCta),
+      onAuthPage: Boolean(probe.onAuthPage),
+      pageUrl: probe.pageUrl ?? null,
+    },
+  });
 }
 
 async function attemptWelcomeBackLogin(

@@ -1,7 +1,6 @@
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
-import net from "node:net";
 import { randomBytes, randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
 import { mkdtemp, rm, mkdir, writeFile } from "node:fs/promises";
@@ -17,8 +16,6 @@ import {
   cleanupStaleProfileState,
   readDevToolsPort,
   verifyDevToolsReachable,
-  writeChromePid,
-  writeDevToolsActivePort,
 } from "../browser/profileState.js";
 import { normalizeChatgptUrl } from "../browser/utils.js";
 
@@ -39,22 +36,6 @@ interface RemoteServerInstance {
   port: number;
   token: string;
   close(): Promise<void>;
-}
-
-async function findAvailablePort(): Promise<number> {
-  return await new Promise<number>((resolve, reject) => {
-    const srv = net.createServer();
-    srv.on("error", (err) => reject(err));
-    srv.listen(0, () => {
-      const address = srv.address();
-      if (typeof address === "object" && address?.port) {
-        const port = address.port;
-        srv.close(() => resolve(port));
-      } else {
-        srv.close(() => reject(new Error("Unable to allocate port")));
-      }
-    });
-  });
 }
 
 export async function createRemoteServer(
@@ -296,7 +277,7 @@ export async function serveRemote(options: RemoteServerOptions = {}): Promise<vo
     if (preferManualLogin) {
       await mkdir(manualProfileDir, { recursive: true });
       console.log(
-        `Cookie extraction is unavailable on this platform. Using manual-login Chrome profile at ${manualProfileDir}. Remote runs will reuse this profile; sign in once when the browser opens.`,
+        `Cookie extraction is unavailable on this platform. Using manual-login Chrome profile at ${manualProfileDir}. Remote runs launch it on demand and reuse the saved sign-in state.`,
       );
       const existingPort = await readDevToolsPort(manualProfileDir);
       if (existingPort) {
@@ -307,15 +288,19 @@ export async function serveRemote(options: RemoteServerOptions = {}): Promise<vo
           );
         } else {
           console.log(
-            `Found stale DevToolsActivePort (port ${existingPort}, ${reachable.error}); launching a fresh manual-login Chrome.`,
+            `Found stale DevToolsActivePort (port ${existingPort}, ${reachable.error}); cleaning up stale profile state.`,
           );
           await cleanupStaleProfileState(manualProfileDir, console.log, {
             lockRemovalMode: "never",
           });
-          void launchManualLoginChrome(manualProfileDir, CHATGPT_URL, console.log);
+          console.log(
+            "No automation Chrome is running now; the next remote run will launch the manual-login browser on demand.",
+          );
         }
       } else {
-        void launchManualLoginChrome(manualProfileDir, CHATGPT_URL, console.log);
+        console.log(
+          "No automation Chrome is running now; the next remote run will launch the manual-login browser on demand.",
+        );
       }
     } else if (opened) {
       console.log(
@@ -573,71 +558,5 @@ function canSpawn(cmd: string): boolean {
     return whichResult.status === 0;
   } catch {
     return false;
-  }
-}
-
-async function launchManualLoginChrome(
-  profileDir: string,
-  url: string,
-  logger: (msg: string) => void,
-): Promise<void> {
-  const timeoutMs = 7000;
-  let finished = false;
-  const timeout = setTimeout(() => {
-    if (!finished) {
-      logger(
-        `Timed out launching Chrome for manual login. Launch Chrome manually with --user-data-dir=${profileDir} and log in to ${url}.`,
-      );
-    }
-  }, timeoutMs);
-
-  try {
-    const chromeLauncher = await import("chrome-launcher");
-    const { launch } = chromeLauncher;
-    const debugPort = await findAvailablePort();
-    logger(`Planned manual-login Chrome DevTools port: ${debugPort}`);
-    const chrome = await launch({
-      // Expose DevTools so later runs can attach instead of spawning a second Chrome.
-      // Use a per-serve free port so the login window stays stable for all runs.
-      port: debugPort,
-      userDataDir: profileDir,
-      startingUrl: url,
-      chromeFlags: [
-        "--no-first-run",
-        "--no-default-browser-check",
-        `--user-data-dir=${profileDir}`,
-        "--remote-allow-origins=*",
-        `--remote-debugging-port=${debugPort}`, // ensure DevToolsActivePort is written even on Windows
-      ],
-    });
-
-    const chosenPort = chrome?.port ?? debugPort ?? null;
-    if (chosenPort) {
-      // Persist DevToolsActivePort eagerly so future runs can attach/reuse this Chrome.
-      await writeDevToolsActivePort(profileDir, chosenPort);
-      if (chrome?.pid) {
-        await writeChromePid(profileDir, chrome.pid);
-      }
-      logger(`Manual-login Chrome DevTools port: ${chosenPort}`);
-      logger(`If needed, DevTools JSON at http://127.0.0.1:${chosenPort}/json/version`);
-    } else {
-      logger(
-        "Warning: unable to determine manual-login Chrome DevTools port. Remote runs may fail to attach.",
-      );
-    }
-
-    finished = true;
-    clearTimeout(timeout);
-    const portInfo = chosenPort ? ` (DevTools port ${chosenPort})` : "";
-    logger(
-      `Opened Chrome with manual-login profile at ${profileDir}${portInfo}. Complete login, then rerun remote sessions.`,
-    );
-  } catch (error) {
-    finished = true;
-    clearTimeout(timeout);
-    const message = error instanceof Error ? error.message : String(error);
-    logger(
-      `Unable to open Chrome for manual login (${message}). Launch Chrome manually with --user-data-dir=${profileDir} and log in to ${url}.`,
-    );
   }
 }

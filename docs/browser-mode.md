@@ -219,7 +219,7 @@ Prefer to keep Chrome entirely on the remote Mac (no DevTools tunneling, no manu
    - The CLI assembles the composed prompt + file bundle locally, sends them to the VM, and streams log lines/answer text back through the same HTTP connection.
    - The remote host runs Chrome locally, pulls ChatGPT cookies from its own Chrome profile, and reuses them across runs while the service is up. If cookies are missing, the service exits after opening chatgpt.com so you can sign in before restarting.
    - Background/detached sessions (`--no-wait`) are disabled in remote mode so the CLI can keep streaming output.
-   - `oracle serve` logs the DevTools port of the manual-login Chrome (e.g., `Manual-login Chrome DevTools port: 54371`). Runs automatically attach to that logged-in Chrome; you can use the printed port/JSON URL for debugging if needed.
+   - `oracle serve` no longer prelaunches manual-login Chrome. The first remote run launches the dedicated profile on demand. Successful runs close it by default; if login is required, Oracle leaves the browser open so you can sign in and rerun.
 
 4. **Stop the host**
    - `Ctrl+C` on the VM shuts down the HTTP server and Chrome. Restart `oracle serve` whenever you need a new session; omit `--token` to let it rotate automatically.

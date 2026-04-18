@@ -69,12 +69,27 @@ function isCloudflareChallengeError(error: unknown): error is BrowserAutomationE
   return (error.details as { stage?: string } | undefined)?.stage === "cloudflare-challenge";
 }
 
-function shouldPreserveBrowserOnError(error: unknown, headless: boolean): boolean {
-  return !headless && isCloudflareChallengeError(error);
+function isLoginRequiredError(error: unknown): error is BrowserAutomationError {
+  if (!(error instanceof BrowserAutomationError)) return false;
+  return (error.details as { stage?: string } | undefined)?.stage === "login-required";
 }
 
-export function shouldPreserveBrowserOnErrorForTest(error: unknown, headless: boolean): boolean {
-  return shouldPreserveBrowserOnError(error, headless);
+function shouldPreserveBrowserOnError(
+  error: unknown,
+  headless: boolean,
+  manualLogin: boolean,
+): boolean {
+  if (headless) return false;
+  if (isCloudflareChallengeError(error)) return true;
+  return manualLogin && isLoginRequiredError(error);
+}
+
+export function shouldPreserveBrowserOnErrorForTest(
+  error: unknown,
+  headless: boolean,
+  manualLogin: boolean,
+): boolean {
+  return shouldPreserveBrowserOnError(error, headless, manualLogin);
 }
 
 export async function runBrowserMode(options: BrowserRunOptions): Promise<BrowserRunResult> {
@@ -942,7 +957,7 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
     stopThinkingMonitor?.();
     const socketClosed = connectionClosedUnexpectedly || isWebSocketClosureError(normalizedError);
     connectionClosedUnexpectedly = connectionClosedUnexpectedly || socketClosed;
-    if (shouldPreserveBrowserOnError(normalizedError, config.headless)) {
+    if (shouldPreserveBrowserOnError(normalizedError, config.headless, manualLogin)) {
       preserveBrowserOnError = true;
       const runtime = {
         chromePid: chrome.pid,
@@ -957,12 +972,27 @@ export async function runBrowserMode(options: BrowserRunOptions): Promise<Browse
         `oracle --engine browser --browser-manual-login ` +
         `--browser-manual-login-profile-dir ${JSON.stringify(userDataDir)}`;
       await emitRuntimeHint();
-      logger("Cloudflare challenge detected; leaving browser open so you can complete the check.");
+      if (isCloudflareChallengeError(normalizedError)) {
+        logger("Cloudflare challenge detected; leaving browser open so you can complete the check.");
+      } else {
+        logger("ChatGPT login required; leaving browser open so you can sign in and rerun.");
+      }
       logger(`Reuse this browser profile with: ${reuseProfileHint}`);
+      if (isCloudflareChallengeError(normalizedError)) {
+        throw new BrowserAutomationError(
+          "Cloudflare challenge detected. Complete the “Just a moment…” check in the open browser, then rerun.",
+          {
+            stage: "cloudflare-challenge",
+            runtime,
+            reuseProfileHint,
+          },
+          normalizedError,
+        );
+      }
       throw new BrowserAutomationError(
-        "Cloudflare challenge detected. Complete the “Just a moment…” check in the open browser, then rerun.",
+        "ChatGPT session not detected. Sign in within the open browser, then rerun.",
         {
-          stage: "cloudflare-challenge",
+          stage: "login-required",
           runtime,
           reuseProfileHint,
         },
@@ -1212,7 +1242,7 @@ async function _assertNavigatedToHttp(
     await delay(250);
   }
   throw new BrowserAutomationError("ChatGPT session not detected; page never left new tab.", {
-    stage: "execute-browser",
+    stage: "login-required",
     details: { url: lastUrl || "(empty)" },
   });
 }
