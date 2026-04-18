@@ -45,6 +45,7 @@ import { resumeBrowserSession } from "../browser/reattach.js";
 import { estimateTokenCount } from "../browser/utils.js";
 import type { BrowserLogger } from "../browser/types.js";
 import { formatElapsed } from "../oracle/format.js";
+import { writeCompletionEnvelope } from "../completionInbox.js";
 
 const isTty = process.stdout.isTTY;
 const dim = (text: string): string => (isTty ? kleur.dim(text) : text);
@@ -135,6 +136,13 @@ export async function performSessionRun({
         error: undefined,
       });
       await writeAssistantOutput(runOptions.writeOutputPath, result.answerText ?? "", log);
+      await publishCompletionEnvelope({
+        sessionMeta,
+        mode,
+        model: sessionMeta.model ?? runOptions.model,
+        usage: result.usage,
+        answerText: result.answerText ?? "",
+      });
       await sendSessionNotification(
         {
           sessionId: sessionMeta.id,
@@ -325,9 +333,10 @@ export async function performSessionRun({
       log(statusColor(line1));
 
       const hasFailure = summary.rejected.length > 0;
+      const completedAt = new Date().toISOString();
       await sessionStore.updateSession(sessionMeta.id, {
         status: hasFailure ? "error" : "completed",
-        completedAt: new Date().toISOString(),
+        completedAt,
         usage: aggregateUsage,
         elapsedMs: summary.elapsedMs,
         response: undefined,
@@ -369,6 +378,16 @@ export async function performSessionRun({
       if (hasFailure) {
         throw summary.rejected[0].reason;
       }
+      await publishCompletionEnvelope({
+        sessionMeta,
+        mode,
+        model: `${multiModels.length} models`,
+        usage: aggregateUsage,
+        answerText: summary.fulfilled
+          .map((entry) => `[${entry.model}]\n${entry.answerText.trim()}`)
+          .join("\n\n"),
+        completedAt,
+      });
       return;
     }
     const singleModelOverride = multiModels.length === 1 ? multiModels[0] : undefined;
@@ -408,6 +427,13 @@ export async function performSessionRun({
     }
     const answerText = extractTextOutput(result.response);
     await writeAssistantOutput(runOptions.writeOutputPath, answerText, log);
+    await publishCompletionEnvelope({
+      sessionMeta,
+      mode,
+      model: sessionMeta.model ?? runOptions.model,
+      usage: result.usage,
+      answerText,
+    });
     await sendSessionNotification(
       {
         sessionId: sessionMeta.id,
@@ -717,6 +743,18 @@ async function autoReattachUntilComplete({
         transport: undefined,
       });
       await writeAssistantOutput(runOptions.writeOutputPath, answerText, log);
+      await publishCompletionEnvelope({
+        sessionMeta,
+        mode: sessionMeta.mode ?? "browser",
+        model: sessionMeta.model ?? runOptions.model,
+        usage: {
+          inputTokens: 0,
+          outputTokens,
+          reasoningTokens: 0,
+          totalTokens: outputTokens,
+        },
+        answerText,
+      });
       await sendSessionNotification(
         {
           sessionId: sessionMeta.id,
@@ -750,6 +788,42 @@ async function autoReattachUntilComplete({
     }
     await wait(Math.min(intervalMs, remainingAfterAttemptMs));
   }
+}
+
+async function publishCompletionEnvelope({
+  sessionMeta,
+  mode,
+  model,
+  usage,
+  answerText,
+  completedAt,
+}: {
+  sessionMeta: SessionMetadata;
+  mode: SessionMode;
+  model?: string;
+  usage?: UsageSummary;
+  answerText: string;
+  completedAt?: string;
+}): Promise<void> {
+  const normalizedAnswer = answerText.trim();
+  if (!normalizedAnswer) {
+    return;
+  }
+  await writeCompletionEnvelope({
+    sessionId: sessionMeta.id,
+    sessionName: sessionMeta.options?.slug ?? sessionMeta.id,
+    completedAt,
+    mode,
+    model,
+    usage,
+    answerText: normalizedAnswer,
+    producerPid: process.pid,
+    resources: {
+      metadata: `oracle-session://${sessionMeta.id}/metadata`,
+      log: `oracle-session://${sessionMeta.id}/log`,
+      request: `oracle-session://${sessionMeta.id}/request`,
+    },
+  });
 }
 
 export function deriveModelOutputPath(

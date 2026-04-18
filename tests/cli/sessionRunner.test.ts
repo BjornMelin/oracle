@@ -30,6 +30,10 @@ vi.mock("../../src/cli/notifier.ts", () => ({
   deriveNotificationSettingsFromMetadata: vi.fn(() => ({ enabled: true, sound: false })),
 }));
 
+vi.mock("../../src/completionInbox.ts", () => ({
+  writeCompletionEnvelope: vi.fn(async () => undefined),
+}));
+
 const sessionStoreMock = vi.hoisted(() => ({
   updateSession: vi.fn(),
   createLogWriter: vi.fn(),
@@ -67,6 +71,7 @@ import {
 import type { OracleResponse, RunOracleResult } from "../../src/oracle.ts";
 import { runBrowserSessionExecution } from "../../src/browser/sessionRunner.ts";
 import { sendSessionNotification } from "../../src/cli/notifier.ts";
+import { writeCompletionEnvelope } from "../../src/completionInbox.ts";
 import { getCliVersion } from "../../src/version.ts";
 import { deriveModelOutputPath } from "../../src/cli/sessionRunner.ts";
 import { resumeBrowserSession } from "../../src/browser/reattach.ts";
@@ -128,7 +133,11 @@ describe("performSessionRun", () => {
       mode: "live",
       usage: { inputTokens: 10, outputTokens: 20, reasoningTokens: 0, totalTokens: 30 },
       elapsedMs: 1234,
-      response: { id: "resp", usage: {}, output: [] },
+      response: {
+        id: "resp",
+        usage: {},
+        output: [{ type: "message", content: [{ type: "output_text", text: "API answer" }] }],
+      },
     };
     vi.mocked(runOracle).mockResolvedValue(liveResult);
 
@@ -159,6 +168,14 @@ describe("performSessionRun", () => {
       baseSessionMeta.id,
       "gpt-5.2-pro",
       expect.objectContaining({ status: "completed" }),
+    );
+    expect(vi.mocked(writeCompletionEnvelope)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: baseSessionMeta.id,
+        mode: "api",
+        model: "gpt-5.2-pro",
+        answerText: expect.any(String),
+      }),
     );
     expect(vi.mocked(sendSessionNotification)).toHaveBeenCalled();
   });
@@ -748,6 +765,14 @@ describe("performSessionRun", () => {
       "gpt-5.2-pro",
       expect.objectContaining({ status: "completed" }),
     );
+    expect(vi.mocked(writeCompletionEnvelope)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: baseSessionMeta.id,
+        mode: "browser",
+        model: "gpt-5.2-pro",
+        answerText: "Answer",
+      }),
+    );
   });
 
   test("writes browser answers to disk when writeOutputPath provided", async () => {
@@ -1054,6 +1079,13 @@ describe("performSessionRun", () => {
       status: "completed",
       response: { status: "completed" },
     });
+    expect(vi.mocked(writeCompletionEnvelope)).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: baseSessionMeta.id,
+        mode: "browser",
+        answerText: "ok markdown",
+      }),
+    );
     expect(vi.mocked(sendSessionNotification)).toHaveBeenCalled();
   });
 

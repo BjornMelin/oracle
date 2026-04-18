@@ -7,6 +7,9 @@ import { getCliVersion } from "../version.js";
 import { registerConsultTool } from "./tools/consult.js";
 import { registerSessionsTool } from "./tools/sessions.js";
 import { registerSessionResources } from "./tools/sessionResources.js";
+import { registerCompletionInboxTool } from "./tools/completionInbox.js";
+import { registerCompletionResources } from "./tools/completionResources.js";
+import { startCompletionInboxWatcher } from "./completionWatcher.js";
 
 export async function startMcpServer(): Promise<void> {
   const server = new McpServer(
@@ -24,6 +27,8 @@ export async function startMcpServer(): Promise<void> {
   registerConsultTool(server);
   registerSessionsTool(server);
   registerSessionResources(server);
+  registerCompletionInboxTool(server);
+  registerCompletionResources(server);
 
   const transport = new StdioServerTransport();
   transport.onerror = (error) => {
@@ -37,7 +42,12 @@ export async function startMcpServer(): Promise<void> {
 
   // Keep the process alive until the client closes the transport.
   await server.connect(transport);
-  await closed;
+  const stopCompletionWatcher = startCompletionInboxWatcher(server);
+  try {
+    await closed;
+  } finally {
+    stopCompletionWatcher();
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("oracle-mcp")) {

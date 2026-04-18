@@ -2,6 +2,8 @@
 
 `oracle-mcp` is a minimal MCP stdio server that mirrors the Oracle CLI. It shares session storage with the CLI (`~/.oracle/sessions` or `ORACLE_HOME_DIR`) so you can mix and match: run with the CLI, inspect or re-run via MCP, or vice versa.
 
+It also watches Oracle's durable completion inbox (`~/.oracle/completion-inbox`) and emits a best-effort MCP log preview when another Oracle process finishes a run while the MCP server is connected. The durable inbox remains the source of truth; the live preview is only a convenience signal.
+
 ## Tools
 
 ### `consult`
@@ -10,15 +12,25 @@
 - Browser-only extras: `browserAttachments?: "auto"|"never"|"always"`, `browserBundleFiles?: boolean`, `browserThinkingTime?: "light"|"standard"|"extended"|"heavy"`, `browserKeepBrowser?: boolean`, `browserModelLabel?: string`.
 - Behavior: starts a session, runs it with the chosen engine, returns final output + metadata. Background/foreground follows the CLI (e.g., GPT‑5 Pro detaches by default).
 - Logging: emits MCP logs (`info` per line, `debug` for streamed chunks with byte sizes). If browser prerequisites are missing, returns an error payload instead of running.
+- Completion previews: when another Oracle process writes a new unread completion inbox item, `oracle-mcp` emits a best-effort `info` logging notification with a short preview (`Oracle completion ready · …`). Clients should treat this as advisory and read `completion_inbox` for durable retrieval/ack.
 
 ### `sessions`
 
 - Inputs: `{id?, hours?, limit?, includeAll?, detail?}` mirroring `oracle status` / `oracle session`.
 - Behavior: without `id`, returns a bounded list of recent sessions. With `id`/slug, returns a summary row; set `detail: true` to fetch full metadata, log, and stored request body.
 
+### `completion_inbox`
+
+- Inputs:
+  - `{ unreadOnly?, limit? }` to list recent completion inbox items (defaults to unread-only, limit 20)
+  - `{ id, ack? }` to fetch one item and optionally mark it read
+- Behavior: returns durable completion packets for Oracle runs that may have finished outside the current tool call. Each packet includes the final answer text, preview, session id/slug, mode/model, timestamps, and pointers back to the canonical session resources.
+- Ack/retention: inbox entries stay unread until explicitly acked, then age out automatically after the retention TTL.
+
 ## Resources
 
 - `oracle-session://{id}/{metadata|log|request}` — read-only resources that surface stored session artifacts via MCP resource reads.
+- `oracle-completion://{id}` — read-only resource that returns one durable completion inbox packet.
 
 ## Background / detach behavior
 

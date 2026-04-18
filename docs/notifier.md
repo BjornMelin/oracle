@@ -2,12 +2,15 @@
 
 Oracle can raise a desktop notification when a session finishes so you don’t have to babysit long runs.
 
+For MCP/Codex workflows, desktop notifications are only the local convenience layer. Oracle also writes successful completions into the durable completion inbox under `~/.oracle/completion-inbox`, which `oracle-mcp` can expose through the `completion_inbox` tool and `oracle-completion://...` resources.
+
 ## Behavior
 
 - **Default:** on, except when `CI` or `SSH_CONNECTION` is set (those environments suppress notifications). The notification still fires when there is no TTY.
 - **Scope:** fires on successful completion only (errors keep quiet).
 - **Content:** `Oracle🧿 finished – session <slug> · $<cost> · <chars> chars`. Cost only shows for API runs where token pricing is known. Character count uses the returned answer text length.
 - **Sound:** off by default. Enable with `--notify-sound` or `ORACLE_NOTIFY_SOUND=1`.
+- **Durable handoff:** desktop notifications do not replace the completion inbox; they mirror the same success event for local operator awareness.
 
 ## CLI flags / env
 
