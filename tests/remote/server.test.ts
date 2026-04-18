@@ -96,6 +96,55 @@ describe("remote browser service", () => {
       await rm(tmpDir, { recursive: true, force: true });
     },
   );
+
+  test.skipIf(!CAN_LISTEN_LOCALHOST)(
+    "enforces the manual-login profile for remote runs without forcing keepBrowser",
+    async () => {
+      let capturedConfig: Record<string, unknown> | null = null;
+      const server = await createRemoteServer(
+        {
+          host: "127.0.0.1",
+          port: 0,
+          token: "secret",
+          logger: () => {},
+          manualLoginDefault: true,
+          manualLoginProfileDir: "/tmp/oracle-profile",
+        },
+        {
+          runBrowser: async (options) => {
+            capturedConfig = { ...(options.config as Record<string, unknown>) };
+            const result: BrowserRunResult = {
+              answerText: "ok",
+              answerMarkdown: "ok",
+              tookMs: 100,
+              answerTokens: 1,
+              answerChars: 2,
+            };
+            return result;
+          },
+        },
+      );
+
+      const executor = createRemoteBrowserExecutor({
+        host: `127.0.0.1:${server.port}`,
+        token: "secret",
+      });
+      await executor({
+        prompt: "remote",
+        attachments: [],
+        config: {},
+      });
+
+      expect(capturedConfig).toMatchObject({
+        manualLogin: true,
+        manualLoginProfileDir: "/tmp/oracle-profile",
+        cookieSync: true,
+      });
+      expect(capturedConfig?.keepBrowser).toBeUndefined();
+
+      await server.close();
+    },
+  );
 });
 
 async function httpGetJson({

@@ -6,6 +6,7 @@ Oracle’s bridge workflow lets you keep an authenticated ChatGPT session on a W
 
 - **Host (Windows)**: runs `oracle bridge host` and holds the signed-in ChatGPT session.
 - **Client (Linux)**: stores the host connection once and routes browser runs (and MCP browser runs) through the host.
+- Bridge-hosted manual-login runs reuse the dedicated Oracle browser profile on Windows, but the Chrome window closes after each run by default. The signed-in profile stays on disk, so the next run relaunches it without requiring a fresh login. Use `--browser-keep-browser` only for debugging or initial setup.
 
 ## 1) Windows: start the host service (recommended)
 

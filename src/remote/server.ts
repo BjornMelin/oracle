@@ -204,7 +204,6 @@ export async function createRemoteServer(
       if (options.manualLoginDefault) {
         payload.browserConfig.manualLogin = true;
         payload.browserConfig.manualLoginProfileDir = options.manualLoginProfileDir;
-        payload.browserConfig.keepBrowser = true;
         if (verbose) {
           logger(
             `[serve] Enforcing manual-login profile at ${options.manualLoginProfileDir ?? "default"} for remote run ${runId}`,
